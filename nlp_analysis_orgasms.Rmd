@@ -1,0 +1,493 @@
+---
+title: "bcs_nlp"
+author: "Laura Lundbye"
+date: "2024-12-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages("SentimentAnalysis")
+install.packages("stringi")
+install.packages("tm")
+install.packages("topicmodels")
+install.packages("ldatuning")
+install.packages("lda")
+install.packages("kableExtra")
+install.packages("DT")
+install.packages("flextable")
+install.packages("reshape2")
+install.packages("pals")
+install.packages("SnowballC")
+library(SnowballC)
+library(pals)
+library(reshape2)
+library(lda)
+library(kableExtra)
+library(DT)
+library(flextable)
+library(ldatuning)
+library(tidyverse)
+library(SentimentAnalysis)
+library(ggplot2)
+library(stringi)
+library(brms)
+library(tm)
+library(topicmodels)
+```
+
+
+```{r}
+df <- read.csv("C:/Users/laura/Desktop/uni/Bachelor/csv.with.text.csv", sep = ";", header = TRUE)
+
+citation()
+```
+
+```{r}
+df$string <- stri_replace_all_regex(df$string, "[^\\P{C}]+", "")  # Removes invalid control characters.
+
+sentiment_scores <- analyzeSentiment(df$string)
+
+df$sentimentscore <- sentiment_scores$SentimentQDAP 
+df$posQDAP <-sentiment_scores$PositivityQDAP 
+df$negQDAP <- sentiment_scores$NegativityQDAP
+
+df <- df[-95, ]
+
+df <- df %>%
+  filter(phase != 9)
+
+# Ensure section is a factor
+df$section <- as.factor(df$section)
+
+# Rename the levels
+levels(df$section) <- c("before", "during", "after")
+
+```
+
+```{r}
+#factoring phase and adding unique identifier
+df <- df %>% 
+  mutate(interview = paste(id, session, sep = "_"))
+
+df$phase <- factor(df$phase, levels = 1:9)
+
+#filtering out two interviews in a new data set
+filtered_df <- df %>% 
+  filter(!(interview %in% c("1_2", "3_2")))
+```
+
+
+```{r}
+#filtering out 0 values
+no_0_fil <- filtered_df %>%
+     filter(!(sentimentscore == 0.00000000 & posQDAP == 0.00000000 & negQDAP == 0.00000000))
+
+no_0_ful <- df %>%
+     filter(!(sentimentscore == 0.00000000 & posQDAP == 0.00000000 & negQDAP == 0.00000000))
+```
+
+
+```{r}
+#plotting filtered data and all data and as boxplots
+ggplot(data = filtered_df, aes(x = as.factor(section), y = sentimentscore, fill = as.factor(section))) +
+  geom_boxplot() +
+  labs(
+    title = "Sentiment Score Distribution by Section",
+    x = "Section",
+    y = "Sentiment Score"
+  ) +
+  scale_fill_discrete(name = "Section") +
+  theme_minimal()
+
+ggplot(data = no_0_ful, aes(x = as.factor(section), y = sentimentscore, fill = as.factor(section))) +
+  geom_boxplot() +
+  labs(
+    title = "Sentiment Score Distribution by Section",
+    x = "Section",
+    y = "Sentiment Score"
+  ) +
+  scale_fill_discrete(name = "Section") +
+  theme_minimal()
+
+```
+
+```{r}
+#checking for normality before running models
+ggplot(no_0_ful, aes(x = sentimentscore)) +
+  geom_density(fill = "blue", alpha = 0.7) +
+  labs(
+    title = "Density Plot of Sentiment Scores",
+    x = "Sentiment Score",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+qqnorm(no_0_ful$sentimentscore, main = "Q-Q Plot of Sentiment Scores")
+qqline(no_0_ful$sentimentscore, col = "red")  # Add a reference line for normal distribution
+```
+
+
+```{r}
+#running 5 models with all interviews
+formula1 <- bf(sentimentscore ~ section + (1 | id) + (1 | session))
+formula2 <- bf(sentimentscore ~ section + session + (1 | id))
+formula3 <- bf(sentimentscore ~ section * session + (1 | id))
+formula4 <- bf(sentimentscore ~ section + (1 | id))
+formula5 <- bf(sentimentscore ~ section)
+
+model_ful1 <- brm(formula = formula1, data = no_0_ful, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+model_ful2 <- brm(formula = formula2, data = no_0_ful, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+model_ful3 <- brm(formula = formula3, data = no_0_ful, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+model_ful4 <- brm(formula = formula4, data = no_0_ful, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+model_ful5 <- brm(formula = formula5, data = no_0_ful, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+summary(model_ful1)
+summary(model_ful2)
+summary(model_ful3)
+summary(model_ful4)
+summary(model_ful5)
+plot(model_ful1)
+plot(model_ful2)
+plot(model_ful3)
+plot(model_ful4)
+plot(model_ful5)
+
+#doing model comparison
+model_ful1 <- add_criterion(model_ful1, "loo")
+model_ful2 <- add_criterion(model_ful2, "loo")
+model_ful3 <- add_criterion(model_ful3, "loo")
+model_ful4 <- add_criterion(model_ful4, "loo")
+model_ful5 <- add_criterion(model_ful5, "loo")
+loo_compare(model_ful1, model_ful2, model_ful3, model_ful4, model_ful5, criterion = "loo")
+
+plot(hypothesis(model_ful4, "Intercept + sectionduring  = Intercept + sectionafter"))
+
+```
+
+```{r}
+#running 5 models with two interviews filtered out
+formula1 <- bf(sentimentscore ~ section + (1 | id) + (1 | session))
+formula2 <- bf(sentimentscore ~ section + session + (1 | id) + (1 | session)) 
+formula3 <- bf(sentimentscore ~ section * session + (1 | id) + (1 | session))
+formula4 <- bf(sentimentscore ~ section + (1 | id))
+formula5 <- bf(sentimentscore ~ section)
+
+model_fil1 <- brm(formula = formula1, data = no_0_fil, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97)) #issues
+
+model_fil2 <- brm(formula = formula2, data = no_0_fil, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97)) #issues
+
+model_fil3 <- brm(formula = formula3, data = no_0_fil, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))#issues
+
+model_fil4 <- brm(formula = formula4, data = no_0_fil, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97)) #no issues
+
+model_fil5 <- brm(formula = formula5, data = no_0_fil, family = gaussian(), chains = 4, cores = 2, iter = 2000, control = list(adapt_delta = 0.97))
+
+summary(model_fil1)
+summary(model_fil2)
+summary(model_fil3)
+summary(model_fil4)
+summary(model_fil5)
+plot(model_fil1)
+plot(model_fil2)
+plot(model_fil3)
+plot(model_fil4)
+plot(model_fil5)
+
+#doing model comparison
+model_fil1 <- add_criterion(model_fil1, "loo")
+model_fil2 <- add_criterion(model_fil2, "loo")
+model_fil3 <- add_criterion(model_fil3, "loo")
+model_fil4 <- add_criterion(model_fil4, "loo")
+model_fil5 <- add_criterion(model_fil5, "loo")
+loo_compare(model_fil1, model_fil2, model_fil3, model_fil4, model_fil5, criterion = "loo")
+```
+
+```{r}
+#moving into topic  modeling now
+#concatinating all strings
+grouped_df <- df %>%
+  #group_by(id, session, section, phase, string) %>%
+  group_by(id, session, section, phase, experience) %>%
+  #group_by(id, session, section) %>%
+  summarize(combined_string = str_c(string, collapse = " "), .groups = "drop")
+
+#investigating strings
+grouped_df$combined_string[4]  # View the first row's text
+
+```
+
+```{r}
+#loading stopwords
+english_stopwords <- readLines("https://slcladal.github.io/resources/stopwords_en.txt", encoding = "UTF-8")
+english_stopwords <- c(english_stopwords, "yeah")
+
+# renaming the columns
+grouped_df <- grouped_df %>%
+  rename(text = combined_string)%>%
+  mutate(doc_id = paste(id, session, section, phase, experience, sep = "_"))%>%
+  mutate(doc_id = as.integer(as.factor(doc_id)))
+
+grouped_df <- grouped_df %>%
+  select(doc_id, everything())
+
+grouped_df <- grouped_df %>%
+  arrange(doc_id)
+
+# creating corpus
+corpus <- Corpus(DataframeSource(as.data.frame(grouped_df)))
+pre_corp <- tm_map(corpus, content_transformer(tolower))
+pre_corp <- tm_map(pre_corp, removeWords, english_stopwords)
+pre_corp <- tm_map(pre_corp, removePunctuation, preserve_intra_word_dashes = TRUE)
+pre_corp <- tm_map(pre_corp, removeNumbers)
+pre_corp <- tm_map(pre_corp, stemDocument, language = "en")
+pre_corp <- tm_map(pre_corp, stripWhitespace)
+
+minimumFrequency <- 1
+DTM <- DocumentTermMatrix(pre_corp, control = list(bounds = list(global = c(minimumFrequency, Inf))))
+
+# have a look at the number of documents and terms in the matrix
+dim(DTM)
+```
+
+```{r}
+#removing rows maybe
+sel_idx <- slam::row_sums(DTM) > 0
+DTM <- DTM[sel_idx, ]
+textdata <- textdata[sel_idx, ]
+```
+
+```{r}
+#finding optimal number of topics
+result <- ldatuning::FindTopicsNumber(
+  DTM,
+  topics = seq(from = 2, to = 20, by = 1),
+  metrics = c("CaoJuan2009",  "Deveaud2014"),
+  method = "Gibbs",
+  control = list(seed = 77),
+  verbose = TRUE
+)
+
+FindTopicsNumber_plot(result)
+```
+```{r}
+# number of topics
+K <- 6
+# set random number generator seed
+set.seed(9161)
+# compute the LDA model, inference via 1000 iterations of Gibbs sampling
+topicModel <- LDA(DTM, K, method="Gibbs", control=list(iter = 500, verbose = 25))
+```
+
+```{r}
+#investigating results
+# have a look a some of the results (posterior distributions)
+tmResult <- posterior(topicModel)
+# format of the resulting object
+attributes(tmResult)
+
+nTerms(DTM) # lengthOfVocab
+
+# topics are probability distributions over the entire vocabulary
+beta <- tmResult$terms   # get beta from results
+dim(beta)                # K distributions over nTerms(DTM) terms
+rowSums(beta)            # rows in beta sum to 1
+nDocs(DTM)               # size of collection
+
+#for every document we have a probability distribution of its contained topics
+theta <- tmResult$topics 
+dim(theta)               # nDocs(DTM) distributions over K topics
+
+#for every document we have a probability distribution of its contained topics
+theta <- tmResult$topics 
+dim(theta)               # nDocs(DTM) distributions over K topics
+
+terms(topicModel, 10)
+```
+
+```{r}
+# re-rank top topic terms for topic names - mkaing it relative 
+topicNames <- apply(lda::top.topic.words(beta, 5, by.score = T), 2, paste, collapse = " ")
+```
+
+```{r}
+attr(topicModel, "alpha")#messing with the alpha to see new topic distribution
+
+topicModel2 <- LDA(DTM, K, method="Gibbs", control=list(iter = 500, verbose = 25, alpha = 2.5))
+
+tmResult <- posterior(topicModel2)
+theta <- tmResult$topics
+beta <- tmResult$terms
+topicNames <- apply(terms(topicModel2, 5), 2, paste, collapse = " ")  # reset topicnames
+```
+
+```{r}
+# visualize topics as word cloud
+topicToViz <- 1 # change for topic of interest
+top40terms <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+# extract the probabilites of each of the 40 terms
+probabilities <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+# visualize the terms as wordcloud
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, color = mycolors)
+```
+
+```{r}
+#investigating individual documents (experiences)
+exampleIds <- c(1, 50, 100)
+lapply(corpus[exampleIds], as.character)
+```
+
+```{r}
+#visualizing these three random documents' topic distributions
+N <- length(exampleIds)
+# get topic proportions form example documents
+topicProportionExamples <- theta[exampleIds,]
+colnames(topicProportionExamples) <- topicNames
+vizDataFrame <- melt(cbind(data.frame(topicProportionExamples), document = factor(1:N)), variable.name = "topic", id.vars = "document")  
+ggplot(data = vizDataFrame, aes(topic, value, fill = document), ylab = "proportion") + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  coord_flip() +
+  facet_wrap(~ document, ncol = N)
+```
+
+```{r}
+# What are the most probable topics in the entire collection?
+topicProportions <- colSums(theta) / nDocs(DTM)  # mean probabilities over all paragraphs
+names(topicProportions) <- topicNames     # assign the topic names we created before
+sort(topicProportions, decreasing = TRUE) # show summed proportions in decreased order
+```
+
+
+```{r}
+#plotting all 27 combinations of participant, section, and session
+# Create a combined column for participant, session, and section
+grouped_df <- grouped_df %>%
+  mutate(combination = paste(id, session, section, sep = "_"))
+
+# Get mean topic proportions per combination
+topic_proportion_per_combination <- aggregate(theta, 
+  by = list(combination = grouped_df$combination, section = grouped_df$section), 
+  mean
+)
+
+# Set topic names
+colnames(topic_proportion_per_combination)[3:(K + 2)] <- topicNames
+
+# Reshape data frame
+vizDataFrame <- melt(topic_proportion_per_combination, id.vars = c("combination", "section"))
+
+# Split 'combination' into separate columns for 'id', 'session', and 'section'
+vizDataFrame <- vizDataFrame %>%
+  separate(combination, into = c("id", "session", "section"), sep = "_")
+
+# Convert 'combination' back into a factor to order the bars
+vizDataFrame$combination <- factor(
+  paste(vizDataFrame$id, vizDataFrame$session, vizDataFrame$section, sep = "_"), 
+  levels = c("1_1_before", "1_1_during", "1_1_after", 
+             "1_2_before", "1_2_during", "1_2_after", 
+             "1_3_before", "1_3_during", "1_3_after", 
+             "2_1_before", "2_1_during", "2_1_after", 
+             "2_2_before", "2_2_during", "2_2_after", 
+             "2_3_before", "2_3_during", "2_3_after", 
+             "3_1_before", "3_1_during", "3_1_after", 
+             "3_2_before", "3_2_during", "3_2_after", 
+             "3_3_before", "3_3_during", "3_3_after")
+)
+
+# Plot with the ordered combinations
+ggplot(vizDataFrame, aes(x = combination, y = value, fill = variable)) + 
+  geom_bar(stat = "identity") + 
+  ylab("Proportion") + 
+  xlab("Participant_Session_Section") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Topics") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+```{r}
+# Aggregate across participants by id, session, and section
+agg_vizDataFrame <- vizDataFrame %>%
+  group_by(session, section, variable) %>%
+  summarise(value = mean(value, na.rm = TRUE)) %>%
+  ungroup()
+
+# Combine session and section into a new variable for the x-axis
+agg_vizDataFrame <- agg_vizDataFrame %>%
+  mutate(combination = paste(session, section, sep = "_"))
+
+agg_vizDataFrame$combination <- factor(
+  paste(agg_vizDataFrame$session, agg_vizDataFrame$section, sep = "_"), 
+  levels = c("1_before", "1_during", "1_after", 
+             "2_before", "2_during", "2_after", 
+             "3_before", "3_during", "3_after"))
+
+# Create the plot with aggregated values
+ggplot(agg_vizDataFrame, aes(x = combination, y = value, fill = variable)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  ylab("Average Proportion") + 
+  xlab("Session_Section") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Topics") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Aggregated Topic Proportions Across Participants by Session and Section")
+
+```
+```{r}
+# Aggregate across sessions by participant, session, and section
+agg2_vizDataFrame <- vizDataFrame %>%
+  group_by(id, section, variable) %>%
+  summarise(value = mean(value, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a new column 'combination' to represent id and section
+agg2_vizDataFrame <- agg2_vizDataFrame %>%
+  mutate(combination = paste(id, section, sep = "_"))
+
+# Correct the factor levels and apply to the 'combination' column in the correct data frame
+agg2_vizDataFrame$combination <- factor(
+  agg2_vizDataFrame$combination, 
+  levels = c("1_before", "1_during", "1_after", 
+             "2_before", "2_during", "2_after", 
+             "3_before", "3_during", "3_after")
+)
+
+# Create the plot with aggregated values across sessions and including participant and section
+ggplot(agg2_vizDataFrame, aes(x = combination, y = value, fill = variable)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  ylab("Average Proportion") + 
+  xlab("Participant_Section") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Topics") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Aggregated Topic Proportions Across Sessions by Participant and Section")
+
+```
+```{r}
+# Aggregate across sections, but keep participant and session
+agg3_vizDataFrame <- vizDataFrame %>%
+  group_by(id, session, variable) %>%
+  summarise(value = mean(value, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a new column 'combination' to represent participant and session
+agg3_vizDataFrame <- agg3_vizDataFrame %>%
+  mutate(combination = paste(id, session, sep = "_"))
+
+# Create the plot with aggregated values across sections, but showing participant and session
+ggplot(agg3_vizDataFrame, aes(x = combination, y = value, fill = variable)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  ylab("Average Proportion") + 
+  xlab("Participant_Session") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Topics") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Aggregated Topic Proportions Across Sections by Participant and Session")
+```
+
